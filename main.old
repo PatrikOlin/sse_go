@@ -1,0 +1,92 @@
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"log"
+)
+
+var messageChan chan string
+
+func main() {
+
+	http.HandleFunc("/handshake", handleSSE())
+
+	http.HandleFunc("/sendmessage", sendMessage())
+
+	http.HandleFunc("/showweather", showWeather("det är soligt"))
+
+	log.Fatal("http server error: ", http.ListenAndServe(":3000", nil))
+
+}
+
+
+func handleSSE() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		log.Printf("Handshake from client")
+
+		// create headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		// instantiate message channel
+		messageChan = make(chan string)
+
+		// close the channel after function exit to prevent memory leaks
+		defer func() {
+			close(messageChan)
+			messageChan = nil
+			log.Printf("client connection is closed")
+		}()
+
+		flusher, _ := w.(http.Flusher)
+
+		// trap request FOREVER
+		for {
+			select {
+
+			// receive and print message
+			case message := <- messageChan:
+				fmt.Fprintf(w, "data: %s\n\n", message)
+				flusher.Flush()
+
+			// connection is closed
+			case <-r.Context().Done():
+				return
+
+			}
+		}
+	}
+}
+
+func showWeather(message string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		if messageChan != nil {
+			log.Printf("print message to client")
+
+			// send message through the channel
+			messageChan <- message
+		}
+	}
+}
+
+func sendMessage() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		msg := r.URL.Query().Get("msg")
+
+		if messageChan != nil {
+			log.Printf("print message to client")
+
+			// send message through the channel
+			if msg != "" {
+				messageChan <- msg
+			}
+		}
+	}
+}
+
